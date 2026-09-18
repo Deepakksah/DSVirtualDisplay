@@ -1,85 +1,117 @@
-License MIT and CC0 or Public Domain (for changes I made, check with Microsoft for their license), whichever is least restrictive -- Use it
+# DSVirtualDisplay - Automated Virtual Display Driver for Windows
 
-AS IS - NO IMPLICIT OR EXPLICIT warranty This may break your computer, it didn't break mine. It runs in User Mode which means it's less likely to cause system instability like the Blue Screen of Death.
-Check out the latest release to download, or find other versions below:
-# Newer Versions
-# Fork that is easy to install
-https://github.com/ge9/IddSampleDriver
+**DSVirtualDisplay** is an automated solution for creating and managing **Virtual Displays (Monitors)** on Windows and Windows Server without requiring any physical monitor, dummy HDMI plug, or display hardware.
 
-## Fork with HDR
-https://github.com/itsmikethetech/Virtual-Display-Driver
+Built on Microsoft's **IddCx (Indirect Display Driver Class Extension)** user-mode framework, it allows seamless headless server management, high-resolution remote desktop access (RDP, AnyDesk, TeamViewer, Parsec, Moonlight/Sunshine), multi-monitor testing, and screen streaming.
 
-If you want me to build on this donate eth or similar here: 0xB01b6328F8Be53c852a54432bbEe630cE0Bd559a
-I now have a NEAR address: moopaloo.near
+---
 
-Thanks to https://github.com/akatrevorjay/edid-generator for the hi-res EDID.
+## 🌟 Key Features
 
-# Indirect Display Driver Sample #
+* **⚡ 1-Click Interactive Installation (`install.bat`):**
+  - Easily choose the number of virtual monitors (**1 to 5 displays**) interactively via the terminal.
+* **🛠️ Automated Registry Configuration:**
+  - Automatically configures Windows Remote Desktop (RDP) **WDDM Graphics Driver** policies (`fEnableWddmDriver = 1`, `EnableWddmDriver = 1`) to eliminate the *"The display settings can't be changed from a remote session"* restriction.
+* **📁 Auto-Configuration Management:**
+  - Creates `C:\IddSampleDriver\` and deploys `option.txt` with your selected display count and resolutions.
+* **🔐 Auto-Trust Driver Certificate:**
+  - Silently imports the driver certificate into Windows **Trusted Root Certification Authorities** and **TrustedPublisher** stores.
+* **🛡️ Crash-Safe User-Mode Driver (UMDF):**
+  - Runs in User Mode (not kernel mode), ensuring your system will never suffer a Blue Screen of Death (BSOD).
+* **🧹 1-Click Clean Uninstallation (`uninstall.bat`):**
+  - Instantly uninstalls the driver, removes device nodes, and cleans up registry entries in a single click.
 
-This is a sample driver that shows how to create a Windows Indirect Display Driver using the IddCx class extension driver.
+---
 
-## Installation
+## 📁 Repository Structure
 
-### Scoop (recommended)
-If you have [Scoop](https://scoop.sh/), you can easily install this driver in one go. In an elevated prompt, run:
-```powershell
-scoop bucket add extras
-scoop bucket add nonportable
-scoop install iddsampledriver-ge9-np -g
+```text
+DSVirtualDisplay/
+├── IddSampleDriver/             # Driver C++ source code and INF configuration
+│   ├── Driver.cpp
+│   ├── Driver.h
+│   └── IddSampleDriver.inf
+├── install.bat                  # 1-Click Administrator Launcher for Installer
+├── install.ps1                  # Interactive setup engine (config, registry, device creation)
+├── uninstall.bat                # 1-Click Administrator Launcher for Uninstaller
+├── uninstall.ps1                # Clean removal engine (device removal & driver cleanup)
+├── option.txt                   # Monitor resolution & display count configuration
+├── IddSampleDriver.sln          # Visual Studio solution file
+└── README.md                    # Project documentation & usage guide
 ```
-The driver should be automatically installed and should be working out of the box.
 
-### Manually
+---
 
-1. Download the latest version from the [releases](https://github.com/ge9/IddSampleDriver/releases/latest) page, and extract the contents to a folder.
-2. Copy `option.txt` to `C:\IddSampleDriver\option.txt` before installing the driver **(important!)**.
-3. See the [guide](https://github.com/roshkins/IddSampleDriver/releases) in [roshkins repo](https://github.com/roshkins/IddSampleDriver) for the rest of the installation steps.
+## 🚀 How to Run & Install (Step-by-Step)
 
-## Configuration
-Configure `C:\IddSampleDriver\option.txt` to set the number of monitors and resolutions.
-See `option.txt`
+### Step 1: Ensure Required Driver Files are Present
+To install the driver on your target machine/server, ensure the following files are inside this directory:
+1. `IddSampleDriver.inf` (included in repo)
+2. `IddSampleDriver.dll` (driver binary)
+3. `IddSampleDriver.cer` (driver certificate)
 
+> **Note:** If you do not have pre-built `.dll` and `.cer` files, download `IddSampleDriver.zip` from [IddSampleDriver Releases](https://github.com/ge9/IddSampleDriver/releases/latest) and place them directly into this directory.
 
-## Background reading ##
+---
 
-Start at the [Indirect Display Driver Model Overview](https://msdn.microsoft.com/en-us/library/windows/hardware/mt761968(v=vs.85).aspx) on MSDN.
+### Step 2: Run the 1-Click Installer
+1. Right-click on **`install.bat`** and select **"Run as administrator"**.
+2. A console window will appear asking:
+   ```text
+   ==========================================================
+     Virtual Monitors Configuration
+   ==========================================================
+     Aap kitne Virtual Monitors banana chahte hain?
+     [1] - 1 Virtual Monitor (Recommended / Default)
+     [2] - 2 Virtual Monitors
+     [3] - 3 Virtual Monitors
+     [4] - 4 Virtual Monitors
+     [5] - 5 Virtual Monitors
+   ----------------------------------------------------------
+   Number enter karein (1-5) [Enter dabayein for 1]:
+   ```
+3. Type the number of virtual monitors you want (`1`, `2`, `3`, `4`, or `5`) and press **Enter**. *(Pressing Enter directly chooses 1 monitor).*
 
-## Customizing the sample ##
+---
 
-The sample driver code is very simplistic and does nothing more than enumerate a single monitor when its device enters the D0/started power state. Throughout the code, there are `TODO` blocks with important information on implementing functionality in a production driver.
+### Step 3: What the Installer Automates
+The script automatically:
+* Creates `C:\IddSampleDriver\` and updates `option.txt` with your chosen monitor count.
+* Enables Remote Desktop WDDM display driver in Windows Registry.
+* Registers the driver certificate into Windows Trusted Root Store.
+* Registers the device node (`Root\IddSampleDriver`) and attaches the virtual display.
 
-### Code structure ###
+---
 
-* `Direct3DDevice` class
-    * Contains logic for enumerating the correct render GPU from DXGI and creating a D3D device.
-    * Manages the lifetime of a DXGI factory and a D3D device created for the render GPU the system is using to render frames for your indirect display device's swap-chain.
-* `SwapChainProcessor` class
-    * Processes frames for a swap-chain assigned to the monitor object on a dedicated thread.
-    * The sample code does nothing with the frames, but demonstrates a correct processing loop with error handling and notifying the OS of frame completion.
-* `IndirectDeviceContext` class
-    * Processes device callbacks from IddCx.
-    * Manages the creation and arrival of the sample monitor.
-    * Handles swap-chain arrival and departure by creating a `Direct3DDevice` and handing it off to a `SwapChainProcessor`.
+### Step 4: Verify & Use Your Virtual Displays
+1. Press `Win + R`, type `desk.cpl`, and hit **Enter** to open **Display Settings**.
+2. You will see your new virtual monitors (**Display 1**, **Display 2**, etc.).
+3. Choose your desired resolution:
+   - `1920 x 1080` (Full HD 60Hz)
+   - `2560 x 1440` (2K 60Hz)
+   - `3840 x 2160` (4K 60Hz)
+4. Now you can connect via **Remote Desktop (RDP)**, **AnyDesk**, **TeamViewer**, or **Parsec** and enjoy full resolution on a headless server without physical screens!
 
-### First steps ###
+---
 
-Consider the capabilities of your device. If the device supports multiple monitors being hotplugged and removed at runtime, you may want to abstract the monitors further from the `IndirectDeviceContext` class.
+## 🔄 How to Change Monitor Count Later
+If you already have 1 virtual monitor running and want to switch to 2 or 3 monitors:
+1. Simply run **`install.bat`** as Administrator again.
+2. Enter the new number (e.g., `2`).
+3. The script will automatically update `option.txt` and reload the virtual display driver immediately without rebooting!
 
-The INF file included in the sample needs updating for production use. One field, `DeviceGroupId`, controls how the UMDF driver gets pooled with other UMDF drivers in the same process. Since indirect display drivers tend to be more complicated than other driver classes, it's highly recommended that you pick a unique string for this field which will cause instances of your device driver to pool in a dedicated process. This will improve system reliability in case your driver encounters a problem since other drivers will not be affected.
+---
 
-Ensure the device information reported to `IddCxAdapterInitAsync` is accurate. This information determines how the device is reported to the OS and what static features (like support for gamma tables) the device will have available. If some information cannot be known immediately in the `EvtDeviceD0Entry` callback, IddCx allows the driver to call `IddCxAdapterInitAsync` at any point after D0 entry, before D0 exit.
+## 🗑️ How to Completely Uninstall
+To remove the virtual display driver and all associated device nodes:
+1. Right-click on **`uninstall.bat`** and select **"Run as administrator"**.
+2. The uninstaller will:
+   - Remove the `Root\IddSampleDriver` device node.
+   - Delete the driver package from the Windows Driver Store.
+   - Clean up applied registry keys and environment variables.
 
-Careful attention should be paid to the frame processing loop. This will directly impact the performance of the user's system, so making use of the [Multimedia Class Scheduler Service](https://msdn.microsoft.com/en-us/library/windows/desktop/ms684247(v=vs.85).aspx) and DXGI's support for [GPU prioritization](https://msdn.microsoft.com/en-us/library/windows/desktop/bb174534(v=vs.85).aspx) should be considered. Any significant work should be performed outside the main processing loop, such as by queuing work in a thread pool. See `SwapChainProcessor::RunCore` for more information.
+---
 
-## License
-
-License MIT and CC0 or Public Domain (for changes I made, check with Microsoft for their license), whichever is least restrictive -- Use it
-
-AS IS - NO IMPLICIT OR EXPLICIT warranty This may break your computer, it didn't break mine. It runs in User Mode which means it's less likely to cause system instability like the Blue Screen of Death.
-
-## Acknowledgements
-
-See the original repo below:
-https://github.com/roshkins/IddSampleDriver
-
-Thanks to https://github.com/akatrevorjay/edid-generator for the hi-res EDID.
+## 📜 License
+Licensed under MIT / CC0 / Public Domain.
+Based on Microsoft's Indirect Display Driver Sample and community contributions by `ge9` and `roshkins`.
