@@ -6,22 +6,29 @@
 :: AnyDesk, or VNC NEVER show a black screen or "Screen cannot be captured".
 :: ==============================================================================
 
+:: 1. Auto-elevate to Administrator if not already elevated
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
+)
+
 echo.
 echo ==========================================================
 echo   Transferring RDP session to Virtual Display (Console)...
 echo ==========================================================
 echo.
 
-:: Automatically detect the current active session ID and redirect to console
+:: 2. Transfer session to console
 powershell -NoProfile -Command "
     $sessionId = (Get-Process -Id $PID).SessionId
-    Write-Host \"Active Session ID: $sessionId\" -ForegroundColor Cyan
-    Write-Host \"Redirecting to Console...\" -ForegroundColor Green
+    Write-Host \"  Active Session ID: $sessionId\" -ForegroundColor Cyan
+    Write-Host \"  Transferring to Console (Virtual Monitor)...\" -ForegroundColor Green
     & \"$env:windir\System32\tscon.exe\" $sessionId /dest:console
 "
 
 if %errorlevel% neq 0 (
     echo.
-    echo [TIP] If access was denied, right-click this file and select 'Run as administrator'.
+    echo [ERROR] Could not transfer session.
     pause
 )
