@@ -8,12 +8,16 @@ Built on Microsoft's **IddCx (Indirect Display Driver Class Extension)** user-mo
 
 ## 🌟 Key Features
 
-* **⚡ 1-Click Interactive Installation (`install.bat`):**
-  - Easily choose the number of virtual monitors (**1 to 5 displays**) interactively via the terminal.
+* **📦 Standalone 1-Click GUI Installer (`Release/Setup.exe`):**
+  - Completely self-contained single executable (~565 KB) with embedded driver binaries (DLL, INF, CER, CAT).
+  - Modern dark-mode GUI to select virtual monitor count (1 to 5 displays) with live installation progress.
+  - Zero external dependencies — no PowerShell scripts or separate DLL files needed on the target machine!
+* **⚡ Script-Based Interactive GUI (`install.bat`):**
+  - Built-in Windows Forms dialog with customizable monitor selection.
 * **🛠️ Automated Registry Configuration:**
   - Automatically configures Windows Remote Desktop (RDP) **WDDM Graphics Driver** policies (`fEnableWddmDriver = 1`, `EnableWddmDriver = 1`) to eliminate the *"The display settings can't be changed from a remote session"* restriction.
 * **📁 Auto-Configuration Management:**
-  - Creates `C:\IddSampleDriver\` and deploys `option.txt` with your selected display count and resolutions.
+  - Creates `C:\IddSampleDriver\` and generates display configuration with 16+ high-resolution modes (from 640x480 up to 4K).
 * **🔐 Auto-Trust Driver Certificate:**
   - Silently imports the driver certificate into Windows **Trusted Root Certification Authorities** and **TrustedPublisher** stores.
 * **🛡️ Crash-Safe User-Mode Driver (UMDF):**
@@ -27,15 +31,19 @@ Built on Microsoft's **IddCx (Indirect Display Driver Class Extension)** user-mo
 
 ```text
 DSVirtualDisplay/
-├── IddSampleDriver/             # Driver C++ source code and INF configuration
+├── Release/
+│   └── Setup.exe                # ⭐ Single standalone GUI installer (All-in-one)
+├── build_setup.ps1              # Builder script to compile Setup.exe (uses built-in csc.exe)
+├── IddSampleDriver/             # Driver C++ source code, binaries and INF
 │   ├── Driver.cpp
 │   ├── Driver.h
+│   ├── IddSampleDriver.dll
+│   ├── iddsampledriver.cer
 │   └── IddSampleDriver.inf
-├── install.bat                  # 1-Click Administrator Launcher for Installer
-├── install.ps1                  # Interactive setup engine (config, registry, device creation)
-├── uninstall.bat                # 1-Click Administrator Launcher for Uninstaller
-├── uninstall.ps1                # Clean removal engine (device removal & driver cleanup)
-├── option.txt                   # Monitor resolution & display count configuration
+├── install.bat                  # 1-Click Launcher for Script Installer
+├── install.ps1                  # Modern GUI setup engine
+├── uninstall.bat                # 1-Click Launcher for Uninstaller
+├── uninstall.ps1                # Clean removal engine
 ├── IddSampleDriver.sln          # Visual Studio solution file
 └── README.md                    # Project documentation & usage guide
 ```

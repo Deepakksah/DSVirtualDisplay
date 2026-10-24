@@ -20,30 +20,144 @@ if (-not $isAdmin) {
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# 2. Interactive Monitor Count Selection
+# 2. GUI Monitor Count Selection (Windows Forms - Built-in, No extra library needed)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Virtual Display Driver - Setup"
+$form.Size = New-Object System.Drawing.Size(420, 340)
+$form.StartPosition = "CenterScreen"
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 40)
+
+# Title Label
+$lblTitle = New-Object System.Windows.Forms.Label
+$lblTitle.Text = "Virtual Monitor Setup"
+$lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
+$lblTitle.ForeColor = [System.Drawing.Color]::FromArgb(100, 200, 255)
+$lblTitle.Location = New-Object System.Drawing.Point(20, 18)
+$lblTitle.Size = New-Object System.Drawing.Size(370, 30)
+$form.Controls.Add($lblTitle)
+
+# Subtitle Label
+$lblSub = New-Object System.Windows.Forms.Label
+$lblSub.Text = "Aap kitne Virtual Monitors banana chahte hain?"
+$lblSub.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$lblSub.ForeColor = [System.Drawing.Color]::FromArgb(200, 200, 200)
+$lblSub.Location = New-Object System.Drawing.Point(20, 55)
+$lblSub.Size = New-Object System.Drawing.Size(370, 22)
+$form.Controls.Add($lblSub)
+
+# Separator line (panel)
+$sep = New-Object System.Windows.Forms.Panel
+$sep.Location = New-Object System.Drawing.Point(20, 82)
+$sep.Size = New-Object System.Drawing.Size(370, 2)
+$sep.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 80)
+$form.Controls.Add($sep)
+
+# Radio buttons for monitor count
+$radioButtons = @()
+$labels = @(
+    "1 Virtual Monitor  (Recommended / Default)",
+    "2 Virtual Monitors",
+    "3 Virtual Monitors",
+    "4 Virtual Monitors",
+    "5 Virtual Monitors"
+)
+
+for ($i = 0; $i -lt 5; $i++) {
+    $rb = New-Object System.Windows.Forms.RadioButton
+    $rb.Text = $labels[$i]
+    $rb.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+    $rb.ForeColor = [System.Drawing.Color]::FromArgb(220, 220, 220)
+    $rb.BackColor = [System.Drawing.Color]::Transparent
+    $rb.Location = New-Object System.Drawing.Point(30, (95 + $i * 34))
+    $rb.Size = New-Object System.Drawing.Size(350, 28)
+    $rb.Cursor = [System.Windows.Forms.Cursors]::Hand
+    if ($i -eq 0) { $rb.Checked = $true }
+    $form.Controls.Add($rb)
+    $radioButtons += $rb
+}
+
+# OK Button
+$btnOK = New-Object System.Windows.Forms.Button
+$btnOK.Text = "Install Now"
+$btnOK.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$btnOK.ForeColor = [System.Drawing.Color]::White
+$btnOK.BackColor = [System.Drawing.Color]::FromArgb(0, 120, 215)
+$btnOK.FlatStyle = "Flat"
+$btnOK.FlatAppearance.BorderSize = 0
+$btnOK.Location = New-Object System.Drawing.Point(20, 268)
+$btnOK.Size = New-Object System.Drawing.Size(175, 38)
+$btnOK.Cursor = [System.Windows.Forms.Cursors]::Hand
+$btnOK.DialogResult = [System.Windows.Forms.DialogResult]::OK
+$form.Controls.Add($btnOK)
+$form.AcceptButton = $btnOK
+
+# Cancel Button
+$btnCancel = New-Object System.Windows.Forms.Button
+$btnCancel.Text = "Cancel"
+$btnCancel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
+$btnCancel.ForeColor = [System.Drawing.Color]::FromArgb(200, 200, 200)
+$btnCancel.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 75)
+$btnCancel.FlatStyle = "Flat"
+$btnCancel.FlatAppearance.BorderSize = 0
+$btnCancel.Location = New-Object System.Drawing.Point(215, 268)
+$btnCancel.Size = New-Object System.Drawing.Size(175, 38)
+$btnCancel.Cursor = [System.Windows.Forms.Cursors]::Hand
+$btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+$form.Controls.Add($btnCancel)
+$form.CancelButton = $btnCancel
+
+# Show the form
+$result = $form.ShowDialog()
+
+if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
+    Write-Host "`n[INFO] Installation cancelled by user." -ForegroundColor Yellow
+    exit 0
+}
+
+# Get selected monitor count
+$numDisplays = 1
+for ($i = 0; $i -lt 5; $i++) {
+    if ($radioButtons[$i].Checked) {
+        $numDisplays = $i + 1
+        break
+    }
+}
+
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Yellow
 Write-Host "  Virtual Monitors Configuration" -ForegroundColor Yellow
 Write-Host "==========================================================" -ForegroundColor Yellow
-Write-Host "  Aap kitne Virtual Monitors banana chahte hain?" -ForegroundColor White
-Write-Host "  [1] - 1 Virtual Monitor (Recommended / Default)" -ForegroundColor Cyan
-Write-Host "  [2] - 2 Virtual Monitors" -ForegroundColor Cyan
-Write-Host "  [3] - 3 Virtual Monitors" -ForegroundColor Cyan
-Write-Host "  [4] - 4 Virtual Monitors" -ForegroundColor Cyan
-Write-Host "  [5] - 5 Virtual Monitors" -ForegroundColor Cyan
-Write-Host "----------------------------------------------------------" -ForegroundColor Gray
-$inputCount = Read-Host "Number enter karein (1-5) [Enter dabayein for 1]"
-
-$numDisplays = 1
-if ($inputCount -match '^[1-5]$') {
-    $numDisplays = [int]$inputCount
-}
 Write-Host "`n  -> Target: $numDisplays Virtual Monitor(s) configure kiye ja rahe hain..." -ForegroundColor Green
 
-# 3. Setup Configuration Directory and option.txt
+# 3. Setup Configuration Directory — Generate option.txt from embedded resolutions
 $ConfigDir = "C:\IddSampleDriver"
 $ConfigFile = Join-Path $ConfigDir "option.txt"
-$SourceOption = Join-Path $ScriptDir "option.txt"
+
+# All supported resolutions are embedded here — no external option.txt needed
+$embeddedResolutions = @(
+    " 640,  480, 60",
+    " 800,  600, 60",
+    "1024,  768, 60",
+    "1280,  720, 60",
+    "1280,  800, 60",
+    "1280, 1024, 60",
+    "1366,  768, 60",
+    "1440,  900, 60",
+    "1600,  900, 60",
+    "1920, 1080, 60",
+    "1920, 1200, 60",
+    "2560, 1440, 60",
+    "2560, 1600, 60",
+    "3840, 2160, 60",
+    "3840, 2400, 60",
+    "4096, 2160, 60"
+)
 
 Write-Host "`n[1/5] Configuring Display Settings..." -ForegroundColor Green
 if (-not (Test-Path $ConfigDir)) {
@@ -51,26 +165,10 @@ if (-not (Test-Path $ConfigDir)) {
     New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
 }
 
-if (Test-Path $SourceOption) {
-    $lines = Get-Content $SourceOption
-    if ($lines.Count -gt 0) {
-        $lines[0] = "$numDisplays"
-        $lines | Set-Content $SourceOption -Encoding ascii
-        $lines | Set-Content $ConfigFile -Encoding ascii
-    } else {
-        Copy-Item -Path $SourceOption -Destination $ConfigFile -Force
-    }
-    Write-Host "  Successfully set $numDisplays display(s) in $ConfigFile" -ForegroundColor Gray
-} else {
-    @"
-$numDisplays
-#lines beginning with "#" are ignored
-1920, 1080, 60
-2560, 1440, 60
-3840, 2160, 60
-"@ | Out-File -FilePath $ConfigFile -Encoding ascii
-    Write-Host "  Created $ConfigFile with $numDisplays display(s)." -ForegroundColor Gray
-}
+# Generate option.txt directly from embedded data
+$configLines = @("$numDisplays") + $embeddedResolutions
+$configLines | Set-Content $ConfigFile -Encoding ascii
+Write-Host "  Generated $ConfigFile with $numDisplays display(s) and $($embeddedResolutions.Count) resolution modes." -ForegroundColor Gray
 
 # Set Environment Variable for config file path
 [Environment]::SetEnvironmentVariable("IDD_SAMPLE_DRIVER_CONFIG", $ConfigFile, "Machine")

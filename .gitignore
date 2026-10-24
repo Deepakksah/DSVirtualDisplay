@@ -240,3 +240,9 @@ ModelManifest.xml
 
 # FAKE - F# Make
 .fake/
+
+# Local archives
+*.zip
+
+# Allow Release/Setup.exe
+!Release/Setup.exe
