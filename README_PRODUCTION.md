@@ -58,7 +58,12 @@ Agar folder ke through run karna ho:
    * Kabhi bhi dobara `install.bat` chalayein → GUI mein nayi count select karein → Install Now.
    * Driver bina server restart ke update ho jayega!
 
-5. **Agar Remove Karna Ho:**
+5. **TeamViewer / AnyDesk Black Screen Fix (RDP band karne ke baad):**
+   * Jab aap RDP window ko seedha `[X]` se close karte hain, Windows session ko lock kar deta hai.
+   * Isliye RDP close karne ke liye **`Disconnect_RDP.bat`** par double click karein (ya Right-click → Run as admin).
+   * Yeh session ko **Virtual Monitor** par live chhod dega, aur TeamViewer par screen kabhi black nahi hogi!
+
+6. **Agar Remove Karna Ho:**
    * `uninstall.bat` par right-click karke **"Run as administrator"** select karein.
 
 ---
