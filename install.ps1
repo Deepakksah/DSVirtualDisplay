@@ -185,7 +185,9 @@ if (-not (Test-Path $tsPolicyPath)) {
 Set-ItemProperty -Path $tsPolicyPath -Name "fEnableWddmDriver" -Value 1 -Type DWord -Force
 Set-ItemProperty -Path $tsPolicyPath -Name "bEnUserSettings" -Value 1 -Type DWord -Force
 Set-ItemProperty -Path $tsPolicyPath -Name "fEnableHardwareMode" -Value 1 -Type DWord -Force
-Write-Host "  Applied WDDM & Hardware Graphics policy in Terminal Services." -ForegroundColor Gray
+Set-ItemProperty -Path $tsPolicyPath -Name "MaxDisconnectionTime" -Value 0 -Type DWord -Force
+Set-ItemProperty -Path $tsPolicyPath -Name "MaxIdleTime" -Value 0 -Type DWord -Force
+Write-Host "  Applied WDDM, Hardware Graphics & Anti-Timeout policy in Terminal Services." -ForegroundColor Gray
 
 # B. Terminal Server WinStations
 $winStationsPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations"
@@ -198,6 +200,34 @@ if (Test-Path $winStationsPath) {
 $rdpPipePath = "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
 if (Test-Path $rdpPipePath) {
     Set-ItemProperty -Path $rdpPipePath -Name "fEnableWddmDriver" -Value 1 -Type DWord -Force
+}
+
+# D. Anti-Blackscreen Keep-Alive when Minimized/Disconnected
+$clientRegPaths = @(
+    "HKLM:\SOFTWARE\Microsoft\Terminal Server Client",
+    "HKCU:\Software\Microsoft\Terminal Server Client",
+    "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services\Client"
+)
+foreach ($crp in $clientRegPaths) {
+    if (-not (Test-Path $crp)) { New-Item -Path $crp -Force | Out-Null }
+    Set-ItemProperty -Path $crp -Name "RemoteDesktop_SuppressWhenMinimized" -Value 2 -Type DWord -Force -ErrorAction SilentlyContinue
+}
+Write-Host "  Applied RemoteDesktop_SuppressWhenMinimized = 2 (prevents black screen on minimize)." -ForegroundColor Gray
+
+# E. Deploy Disconnect_RDP.bat to Desktop
+$sourceDisconnectBat = Join-Path $ScriptDir "Disconnect_RDP.bat"
+if (Test-Path $sourceDisconnectBat) {
+    Copy-Item -Path $sourceDisconnectBat -Destination (Join-Path $ConfigDir "Disconnect_RDP.bat") -Force
+    $desktopPaths = @(
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+    )
+    foreach ($dp in $desktopPaths) {
+        if ($dp -and (Test-Path $dp)) {
+            Copy-Item -Path $sourceDisconnectBat -Destination (Join-Path $dp "Disconnect_RDP.bat") -Force -ErrorAction SilentlyContinue
+        }
+    }
+    Write-Host "  Deployed Disconnect_RDP.bat to Desktop for 1-click safe RDP disconnect." -ForegroundColor Gray
 }
 
 # 5. Locate Driver Files & Install Certificate
