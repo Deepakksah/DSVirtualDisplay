@@ -1,6 +1,6 @@
 # ==============================================================================
-# build_setup.ps1 - Builds a single self-contained Setup.exe
-# Embeds: IddSampleDriver.dll, .inf, .cer, .cat inside the EXE
+# build_setup.ps1 - Builds a single self-contained Setup.exe with embedded diagnostics
+# Embeds: IddSampleDriver.dll, .inf, .cer, .cat, Check_Status.bat, Check_Status.ps1
 # Uses csc.exe (built-in .NET C# compiler) — No external tools needed
 # ==============================================================================
 
@@ -11,20 +11,22 @@ $OutputExe  = Join-Path $ReleaseDir "Setup.exe"
 $TempCs     = Join-Path $env:TEMP "DSVirtualDisplay_Setup.cs"
 
 Write-Host "===========================================================" -ForegroundColor Cyan
-Write-Host "  DSVirtualDisplay - Single EXE Builder" -ForegroundColor Cyan
+Write-Host "  DSVirtualDisplay - Single EXE Builder with Full Diagnostics" -ForegroundColor Cyan
 Write-Host "===========================================================" -ForegroundColor Cyan
 
 # Ensure Release dir
 if (-not (Test-Path $ReleaseDir)) { New-Item -ItemType Directory -Path $ReleaseDir | Out-Null }
 
-# ── Step 1: Encode driver files as Base64 ─────────────────────────────────────
-Write-Host "`n[1/3] Embedding driver files..." -ForegroundColor Green
+# ── Step 1: Encode files as Base64 ────────────────────────────────────────────
+Write-Host "`n[1/3] Embedding driver & diagnostic files..." -ForegroundColor Green
 
 $filePaths = @{
-    DLL = Join-Path $DriverDir "IddSampleDriver.dll"
-    INF = Join-Path $DriverDir "IddSampleDriver.inf"
-    CER = Join-Path $DriverDir "iddsampledriver.cer"
-    CAT = Join-Path $DriverDir "iddsampledriver.cat"
+    DLL    = Join-Path $DriverDir "IddSampleDriver.dll"
+    INF    = Join-Path $DriverDir "IddSampleDriver.inf"
+    CER    = Join-Path $DriverDir "iddsampledriver.cer"
+    CAT    = Join-Path $DriverDir "iddsampledriver.cat"
+    CHKBAT = Join-Path $ScriptDir "Check_Status.bat"
+    CHKPS1 = Join-Path $ScriptDir "Check_Status.ps1"
 }
 
 foreach ($kv in $filePaths.GetEnumerator()) {
@@ -34,234 +36,604 @@ foreach ($kv in $filePaths.GetEnumerator()) {
     }
 }
 
-$dllB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.DLL))
-$infB64  = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.INF))
-$cerB64  = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.CER))
-$catB64  = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.CAT))
+$dllB64    = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.DLL))
+$infB64    = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.INF))
+$cerB64    = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.CER))
+$catB64    = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.CAT))
+$chkBatB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.CHKBAT))
+$chkPs1B64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($filePaths.CHKPS1))
 
-Write-Host "  DLL : $([math]::Round($dllB64.Length*3/4/1KB,1)) KB"
-Write-Host "  INF : $([math]::Round($infB64.Length*3/4/1KB,1)) KB"
-Write-Host "  CER : $([math]::Round($cerB64.Length*3/4/1KB,1)) KB"
-Write-Host "  CAT : $([math]::Round($catB64.Length*3/4/1KB,1)) KB"
+Write-Host "  DLL    : $([math]::Round($dllB64.Length*3/4/1KB,1)) KB"
+Write-Host "  INF    : $([math]::Round($infB64.Length*3/4/1KB,1)) KB"
+Write-Host "  CER    : $([math]::Round($cerB64.Length*3/4/1KB,1)) KB"
+Write-Host "  CAT    : $([math]::Round($catB64.Length*3/4/1KB,1)) KB"
+Write-Host "  CHKBAT : $([math]::Round($chkBatB64.Length*3/4/1KB,1)) KB"
+Write-Host "  CHKPS1 : $([math]::Round($chkPs1B64.Length*3/4/1KB,1)) KB"
 
 # ── Step 2: Write C# source file ──────────────────────────────────────────────
 Write-Host "`n[2/3] Generating C# source..." -ForegroundColor Green
 
-$csLines = @()
-$csLines += 'using System;'
-$csLines += 'using System.Collections.Generic;'
-$csLines += 'using System.Diagnostics;'
-$csLines += 'using System.Drawing;'
-$csLines += 'using System.IO;'
-$csLines += 'using System.Runtime.InteropServices;'
-$csLines += 'using System.Security.Principal;'
-$csLines += 'using System.Text;'
-$csLines += 'using System.Windows.Forms;'
-$csLines += 'using Microsoft.Win32;'
-$csLines += ''
-$csLines += 'static class Program {'
-$csLines += '    [STAThread]'
-$csLines += '    static void Main() {'
-$csLines += '        if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)) {'
-$csLines += '            try { Process.Start(new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location) { Verb = "runas", UseShellExecute = true }); } catch {}'
-$csLines += '            return;'
-$csLines += '        }'
-$csLines += '        Application.EnableVisualStyles();'
-$csLines += '        Application.SetCompatibleTextRenderingDefault(false);'
-$csLines += '        int n = ShowMonitorDialog();'
-$csLines += '        if (n < 1) return;'
-$csLines += '        ShowInstallForm(n);'
-$csLines += '    }'
-$csLines += ''
-$csLines += '    static int ShowMonitorDialog() {'
-$csLines += '        Color bg   = Color.FromArgb(28,28,38);'
-$csLines += '        Color blue = Color.FromArgb(0,120,215);'
-$csLines += '        Color txt  = Color.FromArgb(220,220,230);'
-$csLines += '        Color sub  = Color.FromArgb(160,160,175);'
-$csLines += '        Form f = new Form { Text="Virtual Display Driver - Setup", Size=new Size(440,370),'
-$csLines += '            StartPosition=FormStartPosition.CenterScreen, FormBorderStyle=FormBorderStyle.FixedDialog,'
-$csLines += '            MaximizeBox=false, MinimizeBox=false, BackColor=bg };'
-$csLines += '        f.Controls.Add(new Label { Text="Virtual Monitor Setup",'
-$csLines += '            Font=new Font("Segoe UI",15,FontStyle.Bold), ForeColor=Color.FromArgb(90,190,255),'
-$csLines += '            Location=new Point(20,20), Size=new Size(390,32), BackColor=Color.Transparent });'
-$csLines += '        f.Controls.Add(new Label { Text="Aap kitne Virtual Monitors banana chahte hain?",'
-$csLines += '            Font=new Font("Segoe UI",9), ForeColor=sub,'
-$csLines += '            Location=new Point(22,58), Size=new Size(390,20), BackColor=Color.Transparent });'
-$csLines += '        f.Controls.Add(new Panel { Location=new Point(20,84), Size=new Size(390,1), BackColor=Color.FromArgb(55,55,72) });'
-$csLines += '        string[] opts = { "  1 Virtual Monitor   (Recommended / Default)","  2 Virtual Monitors","  3 Virtual Monitors","  4 Virtual Monitors","  5 Virtual Monitors" };'
-$csLines += '        RadioButton[] rbs = new RadioButton[5];'
-$csLines += '        for (int i=0;i<5;i++) {'
-$csLines += '            rbs[i]=new RadioButton { Text=opts[i], Font=new Font("Segoe UI",10), ForeColor=txt,'
-$csLines += '                BackColor=Color.Transparent, Location=new Point(26,96+i*36), Size=new Size(380,30),'
-$csLines += '                Checked=(i==0), Cursor=Cursors.Hand };'
-$csLines += '            f.Controls.Add(rbs[i]);'
-$csLines += '        }'
-$csLines += '        Button ok = new Button { Text="  Install Now", Font=new Font("Segoe UI",10,FontStyle.Bold),'
-$csLines += '            ForeColor=Color.White, BackColor=blue, FlatStyle=FlatStyle.Flat,'
-$csLines += '            Location=new Point(20,292), Size=new Size(185,40), Cursor=Cursors.Hand, DialogResult=DialogResult.OK };'
-$csLines += '        ok.FlatAppearance.BorderSize=0; f.Controls.Add(ok); f.AcceptButton=ok;'
-$csLines += '        Button cn = new Button { Text="  Cancel", Font=new Font("Segoe UI",10),'
-$csLines += '            ForeColor=sub, BackColor=Color.FromArgb(58,58,72), FlatStyle=FlatStyle.Flat,'
-$csLines += '            Location=new Point(225,292), Size=new Size(185,40), Cursor=Cursors.Hand, DialogResult=DialogResult.Cancel };'
-$csLines += '        cn.FlatAppearance.BorderSize=0; f.Controls.Add(cn); f.CancelButton=cn;'
-$csLines += '        if (f.ShowDialog()!=DialogResult.OK) return -1;'
-$csLines += '        for (int i=0;i<5;i++) if(rbs[i].Checked) return i+1;'
-$csLines += '        return 1;'
-$csLines += '    }'
-$csLines += ''
-$csLines += '    static void ShowInstallForm(int count) {'
-$csLines += '        Color bg  = Color.FromArgb(28,28,38);'
-$csLines += '        Color txt = Color.FromArgb(220,220,230);'
-$csLines += '        Color grn = Color.FromArgb(80,200,100);'
-$csLines += '        Color sub = Color.FromArgb(160,160,175);'
-$csLines += '        Form pf = new Form { Text="Installing...", Size=new Size(460,310),'
-$csLines += '            StartPosition=FormStartPosition.CenterScreen, FormBorderStyle=FormBorderStyle.FixedDialog,'
-$csLines += '            MaximizeBox=false, MinimizeBox=false, BackColor=bg };'
-$csLines += '        Label lbl = new Label { Text="Installing Virtual Display Driver...",'
-$csLines += '            Font=new Font("Segoe UI",11,FontStyle.Bold), ForeColor=Color.FromArgb(90,190,255),'
-$csLines += '            Location=new Point(20,18), Size=new Size(410,28), BackColor=Color.Transparent };'
-$csLines += '        pf.Controls.Add(lbl);'
-$csLines += '        ProgressBar pb = new ProgressBar { Location=new Point(20,55), Size=new Size(410,18),'
-$csLines += '            Minimum=0, Maximum=100, Value=0, Style=ProgressBarStyle.Continuous };'
-$csLines += '        pf.Controls.Add(pb);'
-$csLines += '        ListBox log = new ListBox { Location=new Point(20,84), Size=new Size(410,150),'
-$csLines += '            BackColor=Color.FromArgb(20,20,30), ForeColor=txt,'
-$csLines += '            Font=new Font("Consolas",8), BorderStyle=BorderStyle.None };'
-$csLines += '        pf.Controls.Add(log);'
-$csLines += '        Button bc = new Button { Text="Close", Font=new Font("Segoe UI",9),'
-$csLines += '            ForeColor=sub, BackColor=Color.FromArgb(50,50,65), FlatStyle=FlatStyle.Flat,'
-$csLines += '            Location=new Point(340,248), Size=new Size(90,32), Enabled=false, Cursor=Cursors.Hand };'
-$csLines += '        bc.FlatAppearance.BorderSize=0; bc.Click+=(s,e)=>pf.Close(); pf.Controls.Add(bc);'
-$csLines += '        pf.Show(); Application.DoEvents();'
-$csLines += '        Action<string,int> upd=(msg,pct)=>{'
-$csLines += '            log.Items.Add(msg); log.TopIndex=log.Items.Count-1; pb.Value=pct; Application.DoEvents(); };'
-$csLines += '        bool ok=false;'
-$csLines += '        try {'
-$csLines += '            upd("Extracting driver files to C:\\IddSampleDriver...",10);'
-$csLines += '            string cfgDir=@"C:\IddSampleDriver";'
-$csLines += '            if(!Directory.Exists(cfgDir)) Directory.CreateDirectory(cfgDir);'
-$csLines += '            string dll=Path.Combine(cfgDir,"IddSampleDriver.dll");'
-$csLines += '            string inf=Path.Combine(cfgDir,"IddSampleDriver.inf");'
-$csLines += '            string cer=Path.Combine(cfgDir,"iddsampledriver.cer");'
-$csLines += '            string cat=Path.Combine(cfgDir,"iddsampledriver.cat");'
-$csLines += '            File.WriteAllBytes(dll,Convert.FromBase64String(EmbeddedDll));'
-$csLines += '            File.WriteAllBytes(inf,Convert.FromBase64String(EmbeddedInf));'
-$csLines += '            File.WriteAllBytes(cer,Convert.FromBase64String(EmbeddedCer));'
-$csLines += '            File.WriteAllBytes(cat,Convert.FromBase64String(EmbeddedCat));'
-$csLines += '            upd("  OK: Driver files ready in C:\\IddSampleDriver.",20);'
-$csLines += '            upd("Writing display configuration...",30);'
-$csLines += '            string cfgFile=Path.Combine(cfgDir,"option.txt");'
-$csLines += '            var resLines=new List<string>{ count.ToString(),'
-$csLines += '                " 640,  480, 60"," 800,  600, 60","1024,  768, 60","1280,  720, 60","1280,  800, 60",'
-$csLines += '                "1280, 1024, 60","1366,  768, 60","1440,  900, 60","1600,  900, 60","1920, 1080, 60",'
-$csLines += '                "1920, 1200, 60","2560, 1440, 60","2560, 1600, 60","3840, 2160, 60","4096, 2160, 60" };'
-$csLines += '            File.WriteAllLines(cfgFile,resLines.ToArray());'
-$csLines += '            Environment.SetEnvironmentVariable("IDD_SAMPLE_DRIVER_CONFIG",cfgFile,EnvironmentVariableTarget.Machine);'
-$csLines += '            string rdpBat = "@echo off\r\nnet session >nul 2>&1\r\nif %errorlevel% neq 0 ( powershell -NoProfile -Command \"\"Start-Process -FilePath ''%~f0'' -Verb RunAs\"\" & exit /b )\r\necho Transferring RDP session to Virtual Display (Console)...\r\npowershell -NoProfile -Command \"\"$s=(Get-Process -Id $PID).SessionId; & tscon.exe $s /dest:console\"\"\r\n";'
-$csLines += '            File.WriteAllText(Path.Combine(cfgDir,"Disconnect_RDP.bat"), rdpBat);'
-$csLines += '            try { string d1=Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory); if(!string.IsNullOrEmpty(d1)&&Directory.Exists(d1)) File.WriteAllText(Path.Combine(d1,"Disconnect_RDP.bat"), rdpBat); } catch {}'
-$csLines += '            try { string d2=Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory); if(!string.IsNullOrEmpty(d2)&&Directory.Exists(d2)) File.WriteAllText(Path.Combine(d2,"Disconnect_RDP.bat"), rdpBat); } catch {}'
-$csLines += '            upd(string.Format("  OK: {0} monitor(s) configured + Disconnect_RDP placed on Desktop.",count),40);'
-$csLines += '            upd("Applying registry settings (WDDM & Anti-Blackscreen)...",50);'
-$csLines += '            ApplyReg();'
-$csLines += '            upd("  OK: Registry done.",58);'
-$csLines += '            upd("Installing certificate...",65);'
-$csLines += '            Cmd("certutil.exe",string.Format("-addstore -f Root \"{0}\"",cer));'
-$csLines += '            Cmd("certutil.exe",string.Format("-addstore -f TrustedPublisher \"{0}\"",cer));'
-$csLines += '            upd("  OK: Certificate trusted.",72);'
-$csLines += '            upd("Installing driver...",78);'
-$csLines += '            string pnp=Cmd("pnputil.exe","/enum-devices /class Display");'
-$csLines += '            if(pnp!=null && pnp.IndexOf("IddSample",StringComparison.OrdinalIgnoreCase)>=0) {'
-$csLines += '                upd("  Reloading existing driver...",84);'
-$csLines += '                Cmd("pnputil.exe",@"/restart-device /deviceid ""Root\IddSampleDriver""");'
-$csLines += '            } else {'
-$csLines += '                Cmd("pnputil.exe",string.Format("/add-driver \"{0}\" /install",inf));'
-$csLines += '                InstallRoot(inf);'
-$csLines += '            }'
-$csLines += '            Cmd("pnputil.exe","/scan-devices");'
-$csLines += '            upd("  OK: Driver installed.",95);'
-$csLines += '            ok=true; upd(string.Format("SUCCESS! {0} Virtual Monitor(s) ready.",count),100);'
-$csLines += '        } catch(Exception ex) { upd("ERROR: "+ex.Message, pb.Value); }'
-$csLines += '        lbl.Text = ok ? string.Format("+ {0} Monitor(s) installed successfully!",count) : "- Installation failed!";'
-$csLines += '        lbl.ForeColor = ok ? grn : Color.FromArgb(255,80,80);'
-$csLines += '        bc.Enabled=true; bc.BackColor=Color.FromArgb(0,120,215); bc.ForeColor=Color.White;'
-$csLines += '        Application.Run(pf);'
-$csLines += '    }'
-$csLines += ''
-$csLines += '    static void ApplyReg() {'
-$csLines += '        foreach(string k in new[]{'
-$csLines += '            @"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services",'
-$csLines += '            @"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations",'
-$csLines += '            @"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"}) {'
-$csLines += '            RegistryKey rk=Registry.LocalMachine.OpenSubKey(k,true)??Registry.LocalMachine.CreateSubKey(k);'
-$csLines += '            if(rk==null) continue;'
-$csLines += '            rk.SetValue("fEnableWddmDriver",1,RegistryValueKind.DWord);'
-$csLines += '            rk.SetValue("EnableWddmDriver",1,RegistryValueKind.DWord);'
-$csLines += '            rk.SetValue("bEnUserSettings",1,RegistryValueKind.DWord);'
-$csLines += '            rk.SetValue("fEnableHardwareMode",1,RegistryValueKind.DWord);'
-$csLines += '            rk.SetValue("MaxDisconnectionTime",0,RegistryValueKind.DWord);'
-$csLines += '            rk.SetValue("MaxIdleTime",0,RegistryValueKind.DWord);'
-$csLines += '            rk.Close();'
-$csLines += '        }'
-$csLines += '        foreach(string k in new[]{@"SOFTWARE\Microsoft\Terminal Server Client",@"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services\Client"}) {'
-$csLines += '            try { RegistryKey rk=Registry.LocalMachine.OpenSubKey(k,true)??Registry.LocalMachine.CreateSubKey(k); if(rk!=null){ rk.SetValue("RemoteDesktop_SuppressWhenMinimized",2,RegistryValueKind.DWord); rk.Close(); } } catch {}'
-$csLines += '            try { RegistryKey rku=Registry.CurrentUser.OpenSubKey(k,true)??Registry.CurrentUser.CreateSubKey(k); if(rku!=null){ rku.SetValue("RemoteDesktop_SuppressWhenMinimized",2,RegistryValueKind.DWord); rku.Close(); } } catch {}'
-$csLines += '        }'
-$csLines += '        try { Cmd("sc.exe","config TeamViewer start= auto"); Cmd("net.exe","start TeamViewer"); } catch {}'
-$csLines += '    }'
-$csLines += ''
-$csLines += '    static string Cmd(string exe,string args) {'
-$csLines += '        try { var p=new Process{StartInfo=new ProcessStartInfo(exe,args){'
-$csLines += '            RedirectStandardOutput=true,UseShellExecute=false,CreateNoWindow=true}};'
-$csLines += '            p.Start(); string o=p.StandardOutput.ReadToEnd(); p.WaitForExit(15000); return o;'
-$csLines += '        } catch { return null; }'
-$csLines += '    }'
-$csLines += ''
-$csLines += '    [DllImport("setupapi.dll",SetLastError=true,CharSet=CharSet.Auto)]'
-$csLines += '    static extern IntPtr SetupDiCreateDeviceInfoList(ref Guid g,IntPtr h);'
-$csLines += '    [DllImport("setupapi.dll",SetLastError=true,CharSet=CharSet.Auto)]'
-$csLines += '    static extern bool SetupDiCreateDeviceInfo(IntPtr s,string n,ref Guid g,string d,IntPtr h,uint f,ref SPDD dd);'
-$csLines += '    [DllImport("setupapi.dll",SetLastError=true,CharSet=CharSet.Auto)]'
-$csLines += '    static extern bool SetupDiSetDeviceRegistryProperty(IntPtr s,ref SPDD d,uint p,byte[] b,uint sz);'
-$csLines += '    [DllImport("setupapi.dll",SetLastError=true,CharSet=CharSet.Auto)]'
-$csLines += '    static extern bool SetupDiCallClassInstaller(uint f,IntPtr s,ref SPDD d);'
-$csLines += '    [DllImport("setupapi.dll",SetLastError=true)]'
-$csLines += '    static extern bool SetupDiDestroyDeviceInfoList(IntPtr s);'
-$csLines += '    [DllImport("newdev.dll",SetLastError=true,CharSet=CharSet.Auto)]'
-$csLines += '    static extern bool UpdateDriverForPlugAndPlayDevices(IntPtr h,string id,string inf,uint flags,out bool rb);'
-$csLines += '    [StructLayout(LayoutKind.Sequential)]'
-$csLines += '    struct SPDD { public uint cbSize; public Guid ClassGuid; public uint DevInst; public IntPtr Reserved; }'
-$csLines += ''
-$csLines += '    static void InstallRoot(string inf) {'
-$csLines += '        try {'
-$csLines += '            Guid dc=new Guid("{4d36e968-e325-11ce-bfc1-08002be10318}");'
-$csLines += '            IntPtr ds=SetupDiCreateDeviceInfoList(ref dc,IntPtr.Zero);'
-$csLines += '            if(ds==(IntPtr)(-1)) return;'
-$csLines += '            SPDD dd=new SPDD{cbSize=(uint)Marshal.SizeOf(typeof(SPDD))};'
-$csLines += '            if(!SetupDiCreateDeviceInfo(ds,"IddSampleDriver",ref dc,"IddSampleDriver Device",IntPtr.Zero,1,ref dd)){SetupDiDestroyDeviceInfoList(ds);return;}'
-$csLines += '            byte[] hw=Encoding.Unicode.GetBytes(@"Root\IddSampleDriver"+"\0\0");'
-$csLines += '            SetupDiSetDeviceRegistryProperty(ds,ref dd,1,hw,(uint)hw.Length);'
-$csLines += '            SetupDiCallClassInstaller(0x19,ds,ref dd);'
-$csLines += '            bool rb; UpdateDriverForPlugAndPlayDevices(IntPtr.Zero,@"Root\IddSampleDriver",inf,1,out rb);'
-$csLines += '            SetupDiDestroyDeviceInfoList(ds);'
-$csLines += '        } catch {}'
-$csLines += '    }'
-$csLines += ''
+$template = @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Drawing;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
+using System.Security.Principal;
+using System.Text;
+using System.Windows.Forms;
+using Microsoft.Win32;
 
-# Inject Base64 constants (split into lines to avoid PowerShell string length issues)
-$csLines += "    const string EmbeddedDll = `"$dllB64`";"
-$csLines += "    const string EmbeddedInf = `"$infB64`";"
-$csLines += "    const string EmbeddedCer = `"$cerB64`";"
-$csLines += "    const string EmbeddedCat = `"$catB64`";"
-$csLines += '}'
+static class Program {
+    const string EmbeddedDll    = "__DLL_B64__";
+    const string EmbeddedInf    = "__INF_B64__";
+    const string EmbeddedCer    = "__CER_B64__";
+    const string EmbeddedCat    = "__CAT_B64__";
+    const string EmbeddedChkBat = "__CHKBAT_B64__";
+    const string EmbeddedChkPs1 = "__CHKPS1_B64__";
 
-[IO.File]::WriteAllLines($TempCs, $csLines, [Text.Encoding]::UTF8)
+    static readonly string LogFile = @"C:\IddSampleDriver\install_log.txt";
+
+    [STAThread]
+    static void Main() {
+        if (!new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)) {
+            try {
+                Process.Start(new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location) {
+                    Verb = "runas",
+                    UseShellExecute = true
+                });
+            } catch {}
+            return;
+        }
+
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+
+        int count = ShowMonitorDialog();
+        if (count < 1) return;
+
+        ShowInstallForm(count);
+    }
+
+    static int ShowMonitorDialog() {
+        Color bg   = Color.FromArgb(28, 28, 38);
+        Color blue = Color.FromArgb(0, 120, 215);
+        Color txt  = Color.FromArgb(220, 220, 230);
+        Color sub  = Color.FromArgb(160, 160, 175);
+
+        Form f = new Form {
+            Text = "Virtual Display Driver - Setup",
+            Size = new Size(450, 380),
+            StartPosition = FormStartPosition.CenterScreen,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            BackColor = bg
+        };
+
+        f.Controls.Add(new Label {
+            Text = "Virtual Monitor Setup",
+            Font = new Font("Segoe UI", 15, FontStyle.Bold),
+            ForeColor = Color.FromArgb(90, 190, 255),
+            Location = new Point(20, 18),
+            Size = new Size(400, 32),
+            BackColor = Color.Transparent
+        });
+
+        f.Controls.Add(new Label {
+            Text = "Select number of Virtual Monitors to create for Headless Server:",
+            Font = new Font("Segoe UI", 9),
+            ForeColor = sub,
+            Location = new Point(22, 54),
+            Size = new Size(400, 22),
+            BackColor = Color.Transparent
+        });
+
+        f.Controls.Add(new Panel {
+            Location = new Point(20, 80),
+            Size = new Size(395, 1),
+            BackColor = Color.FromArgb(55, 55, 72)
+        });
+
+        string[] opts = {
+            "  1 Virtual Monitor   (Recommended / Headless Server)",
+            "  2 Virtual Monitors",
+            "  3 Virtual Monitors",
+            "  4 Virtual Monitors",
+            "  5 Virtual Monitors"
+        };
+
+        RadioButton[] rbs = new RadioButton[5];
+        for (int i = 0; i < 5; i++) {
+            rbs[i] = new RadioButton {
+                Text = opts[i],
+                Font = new Font("Segoe UI", 10),
+                ForeColor = txt,
+                BackColor = Color.Transparent,
+                Location = new Point(26, 92 + i * 36),
+                Size = new Size(385, 30),
+                Checked = (i == 0),
+                Cursor = Cursors.Hand
+            };
+            f.Controls.Add(rbs[i]);
+        }
+
+        Button ok = new Button {
+            Text = "  Install Now",
+            Font = new Font("Segoe UI", 10, FontStyle.Bold),
+            ForeColor = Color.White,
+            BackColor = blue,
+            FlatStyle = FlatStyle.Flat,
+            Location = new Point(20, 285),
+            Size = new Size(190, 42),
+            Cursor = Cursors.Hand,
+            DialogResult = DialogResult.OK
+        };
+        ok.FlatAppearance.BorderSize = 0;
+        f.Controls.Add(ok);
+        f.AcceptButton = ok;
+
+        Button cn = new Button {
+            Text = "  Cancel",
+            Font = new Font("Segoe UI", 10),
+            ForeColor = sub,
+            BackColor = Color.FromArgb(58, 58, 72),
+            FlatStyle = FlatStyle.Flat,
+            Location = new Point(225, 285),
+            Size = new Size(190, 42),
+            Cursor = Cursors.Hand,
+            DialogResult = DialogResult.Cancel
+        };
+        cn.FlatAppearance.BorderSize = 0;
+        f.Controls.Add(cn);
+        f.CancelButton = cn;
+
+        if (f.ShowDialog() != DialogResult.OK) return -1;
+        for (int i = 0; i < 5; i++) {
+            if (rbs[i].Checked) return i + 1;
+        }
+        return 1;
+    }
+
+    static void ShowInstallForm(int count) {
+        Color bg  = Color.FromArgb(28, 28, 38);
+        Color txt = Color.FromArgb(220, 220, 230);
+        Color grn = Color.FromArgb(80, 200, 100);
+        Color red = Color.FromArgb(255, 90, 90);
+        Color sub = Color.FromArgb(160, 160, 175);
+        Color blue = Color.FromArgb(0, 120, 215);
+
+        Form pf = new Form {
+            Text = "Virtual Display Driver - Installation & Diagnostics",
+            Size = new Size(540, 450),
+            StartPosition = FormStartPosition.CenterScreen,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            BackColor = bg
+        };
+
+        Label lbl = new Label {
+            Text = "Installing Virtual Display Driver...",
+            Font = new Font("Segoe UI", 11, FontStyle.Bold),
+            ForeColor = Color.FromArgb(90, 190, 255),
+            Location = new Point(20, 16),
+            Size = new Size(485, 26),
+            BackColor = Color.Transparent
+        };
+        pf.Controls.Add(lbl);
+
+        ProgressBar pb = new ProgressBar {
+            Location = new Point(20, 46),
+            Size = new Size(485, 16),
+            Minimum = 0,
+            Maximum = 100,
+            Value = 0,
+            Style = ProgressBarStyle.Continuous
+        };
+        pf.Controls.Add(pb);
+
+        ListBox log = new ListBox {
+            Location = new Point(20, 72),
+            Size = new Size(485, 280),
+            BackColor = Color.FromArgb(18, 18, 26),
+            ForeColor = txt,
+            Font = new Font("Consolas", 8.5f),
+            BorderStyle = BorderStyle.FixedSingle,
+            HorizontalScrollbar = true
+        };
+        pf.Controls.Add(log);
+
+        Button btnLog = new Button {
+            Text = "Open Log",
+            Font = new Font("Segoe UI", 9),
+            ForeColor = Color.White,
+            BackColor = Color.FromArgb(50, 70, 95),
+            FlatStyle = FlatStyle.Flat,
+            Location = new Point(20, 362),
+            Size = new Size(110, 34),
+            Cursor = Cursors.Hand,
+            Enabled = false
+        };
+        btnLog.FlatAppearance.BorderSize = 0;
+        btnLog.Click += (s, e) => {
+            try { Process.Start("notepad.exe", LogFile); } catch {}
+        };
+        pf.Controls.Add(btnLog);
+
+        Button btnCheck = new Button {
+            Text = "Run Diagnostics",
+            Font = new Font("Segoe UI", 9),
+            ForeColor = Color.White,
+            BackColor = Color.FromArgb(60, 60, 80),
+            FlatStyle = FlatStyle.Flat,
+            Location = new Point(140, 362),
+            Size = new Size(130, 34),
+            Cursor = Cursors.Hand,
+            Enabled = false
+        };
+        btnCheck.FlatAppearance.BorderSize = 0;
+        btnCheck.Click += (s, e) => {
+            string chk = @"C:\IddSampleDriver\Check_Status.bat";
+            if (File.Exists(chk)) {
+                try { Process.Start(new ProcessStartInfo(chk) { UseShellExecute = true }); } catch {}
+            }
+        };
+        pf.Controls.Add(btnCheck);
+
+        Button btnClose = new Button {
+            Text = "Close",
+            Font = new Font("Segoe UI", 9, FontStyle.Bold),
+            ForeColor = sub,
+            BackColor = Color.FromArgb(50, 50, 65),
+            FlatStyle = FlatStyle.Flat,
+            Location = new Point(405, 362),
+            Size = new Size(100, 34),
+            Cursor = Cursors.Hand,
+            Enabled = false
+        };
+        btnClose.FlatAppearance.BorderSize = 0;
+        btnClose.Click += (s, e) => pf.Close();
+        pf.Controls.Add(btnClose);
+
+        pf.Show();
+        Application.DoEvents();
+
+        Action<string, int> logMsg = (msg, pct) => {
+            string line = string.Format("[{0}] {1}", DateTime.Now.ToString("HH:mm:ss"), msg);
+            log.Items.Add(line);
+            log.TopIndex = log.Items.Count - 1;
+            if (pct >= 0 && pct <= 100) pb.Value = pct;
+            try {
+                string dir = Path.GetDirectoryName(LogFile);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                File.AppendAllText(LogFile, line + "\r\n");
+            } catch {}
+            Application.DoEvents();
+        };
+
+        bool ok = false;
+        try {
+            try {
+                string dir = Path.GetDirectoryName(LogFile);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                File.WriteAllText(LogFile, string.Format("=== DSVirtualDisplay Setup Log ({0}) ===\r\n\r\n", DateTime.Now));
+            } catch {}
+
+            logMsg("Extracting driver files to C:\\IddSampleDriver...", 10);
+            string cfgDir = @"C:\IddSampleDriver";
+            if (!Directory.Exists(cfgDir)) Directory.CreateDirectory(cfgDir);
+
+            string dll = Path.Combine(cfgDir, "IddSampleDriver.dll");
+            string inf = Path.Combine(cfgDir, "IddSampleDriver.inf");
+            string cer = Path.Combine(cfgDir, "iddsampledriver.cer");
+            string cat = Path.Combine(cfgDir, "iddsampledriver.cat");
+            string bat = Path.Combine(cfgDir, "Disconnect_RDP.bat");
+            string chkBat = Path.Combine(cfgDir, "Check_Status.bat");
+            string chkPs1 = Path.Combine(cfgDir, "Check_Status.ps1");
+
+            File.WriteAllBytes(dll, Convert.FromBase64String(EmbeddedDll));
+            File.WriteAllBytes(inf, Convert.FromBase64String(EmbeddedInf));
+            File.WriteAllBytes(cer, Convert.FromBase64String(EmbeddedCer));
+            File.WriteAllBytes(cat, Convert.FromBase64String(EmbeddedCat));
+            File.WriteAllBytes(chkBat, Convert.FromBase64String(EmbeddedChkBat));
+            File.WriteAllBytes(chkPs1, Convert.FromBase64String(EmbeddedChkPs1));
+
+            logMsg("  Extracted driver, cert, and diagnostic utilities.", 20);
+
+            logMsg("Configuring display options...", 28);
+            string cfgFile = Path.Combine(cfgDir, "option.txt");
+            var resList = new List<string> {
+                count.ToString(),
+                " 640,  480, 60", " 800,  600, 60", "1024,  768, 60", "1280,  720, 60",
+                "1280,  800, 60", "1280, 1024, 60", "1366,  768, 60", "1440,  900, 60",
+                "1600,  900, 60", "1920, 1080, 60", "1920, 1200, 60", "2560, 1440, 60",
+                "2560, 1600, 60", "3840, 2160, 60", "4096, 2160, 60"
+            };
+            File.WriteAllLines(cfgFile, resList.ToArray());
+            Environment.SetEnvironmentVariable("IDD_SAMPLE_DRIVER_CONFIG", cfgFile, EnvironmentVariableTarget.Machine);
+            logMsg(string.Format("  Configured {0} virtual display(s) in option.txt.", count), 35);
+
+            logMsg("Creating Disconnect_RDP.bat helper script...", 40);
+            string rdpBatContent = "@echo off\r\nnet session >nul 2>&1\r\nif %errorlevel% neq 0 ( powershell -NoProfile -Command \"Start-Process -FilePath ''%~f0'' -Verb RunAs\" & exit /b )\r\necho Transferring RDP session to Virtual Display (Console)...\r\npowershell -NoProfile -Command \"$s=(Get-Process -Id $PID).SessionId; & tscon.exe $s /dest:console\"\r\n";
+            File.WriteAllText(bat, rdpBatContent);
+
+            string[] desktops = {
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+            };
+            foreach (string d in desktops) {
+                if (!string.IsNullOrEmpty(d) && Directory.Exists(d)) {
+                    try { File.WriteAllText(Path.Combine(d, "Disconnect_RDP.bat"), rdpBatContent); } catch {}
+                    try { File.Copy(chkBat, Path.Combine(d, "Check_Status.bat"), true); } catch {}
+                    try { File.Copy(chkPs1, Path.Combine(d, "Check_Status.ps1"), true); } catch {}
+                }
+            }
+            logMsg("  Placed Disconnect_RDP.bat & Check_Status.bat on Desktop.", 46);
+
+            logMsg("Configuring WDDM and Remote Desktop registry settings...", 52);
+            ApplyReg(logMsg);
+
+            logMsg("Installing security certificate into Trusted Stores...", 60);
+            InstallCertificate(cer, logMsg);
+
+            logMsg("Registering driver package in DriverStore...", 70);
+            string pnpAdd = Cmd("pnputil.exe", string.Format("/add-driver \"{0}\" /install", inf));
+            if (!string.IsNullOrEmpty(pnpAdd)) {
+                string[] pnpLines = pnpAdd.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string l in pnpLines) {
+                    if (l.IndexOf("Driver package added", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        l.IndexOf("published", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                        l.IndexOf("successfully", StringComparison.OrdinalIgnoreCase) >= 0) {
+                        logMsg("  PnPUtil: " + l.Trim(), -1);
+                    }
+                }
+            }
+
+            logMsg("Creating Root device node and binding driver...", 78);
+            bool rootOk = InstallRootDevice(inf, logMsg);
+
+            logMsg("Rescanning hardware devices (pnputil /scan-devices)...", 85);
+            Cmd("pnputil.exe", "/scan-devices");
+
+            logMsg("Verifying Virtual Display status in Device Manager...", 90);
+            string pnpEnum = Cmd("pnputil.exe", "/enum-devices /class Display");
+            bool driverActive = false;
+            if (!string.IsNullOrEmpty(pnpEnum) && pnpEnum.IndexOf("IddSample", StringComparison.OrdinalIgnoreCase) >= 0) {
+                if (pnpEnum.IndexOf("Started", StringComparison.OrdinalIgnoreCase) >= 0) {
+                    driverActive = true;
+                    logMsg("  [VERIFIED] IddSampleDriver is active and Started!", 96);
+                } else {
+                    logMsg("  [WARNING] IddSampleDriver found in Device Manager, but Status is not 'Started'.", 96);
+                }
+            } else {
+                logMsg("  [WARNING] IddSampleDriver device was not detected in Display class.", 96);
+            }
+
+            if (driverActive || rootOk) {
+                ok = true;
+                logMsg(string.Format("SUCCESS! {0} Virtual Monitor(s) installed and ready.", count), 100);
+            } else {
+                logMsg("INSTALLATION WARNING: Driver could not be confirmed as active.", 100);
+                logMsg("Click 'Run Diagnostics' or 'Open Log' for detailed diagnostic info.", -1);
+            }
+        } catch (Exception ex) {
+            logMsg("[CRITICAL ERROR] " + ex.Message, pb.Value);
+        }
+
+        lbl.Text = ok ? string.Format("+ {0} Virtual Monitor(s) ready!", count) : "- Installation completed with warnings";
+        lbl.ForeColor = ok ? grn : red;
+        btnLog.Enabled = true;
+        btnCheck.Enabled = true;
+        btnClose.Enabled = true;
+        btnClose.BackColor = blue;
+        btnClose.ForeColor = Color.White;
+        pf.AcceptButton = btnClose;
+
+        Application.Run(pf);
+    }
+
+    static void InstallCertificate(string cerPath, Action<string, int> logMsg) {
+        try {
+            byte[] raw = File.ReadAllBytes(cerPath);
+            X509Certificate2 cert = new X509Certificate2(raw);
+
+            using (X509Store store = new X509Store(StoreName.Root, StoreLocation.LocalMachine)) {
+                store.Open(OpenFlags.ReadWrite);
+                store.Add(cert);
+                store.Close();
+            }
+            using (X509Store store = new X509Store(StoreName.TrustedPublisher, StoreLocation.LocalMachine)) {
+                store.Open(OpenFlags.ReadWrite);
+                store.Add(cert);
+                store.Close();
+            }
+            logMsg("  Certificate added to LocalMachine Root & TrustedPublisher (.NET API).", -1);
+        } catch (Exception ex) {
+            logMsg("  .NET Cert store notice: " + ex.Message, -1);
+        }
+
+        string r1 = Cmd("certutil.exe", string.Format("-addstore -f Root \"{0}\"", cerPath));
+        string r2 = Cmd("certutil.exe", string.Format("-addstore -f TrustedPublisher \"{0}\"", cerPath));
+        if (r1 != null && r1.IndexOf("success", StringComparison.OrdinalIgnoreCase) >= 0) logMsg("  certutil Root store: OK.", -1);
+        if (r2 != null && r2.IndexOf("success", StringComparison.OrdinalIgnoreCase) >= 0) logMsg("  certutil TrustedPublisher: OK.", -1);
+    }
+
+    static void ApplyReg(Action<string, int> logMsg) {
+        string[] polKeys = {
+            @"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services",
+            @"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations",
+            @"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+        };
+        foreach (string k in polKeys) {
+            try {
+                RegistryKey rk = Registry.LocalMachine.OpenSubKey(k, true) ?? Registry.LocalMachine.CreateSubKey(k);
+                if (rk != null) {
+                    rk.SetValue("fEnableWddmDriver", 1, RegistryValueKind.DWord);
+                    rk.SetValue("EnableWddmDriver", 1, RegistryValueKind.DWord);
+                    rk.SetValue("bEnUserSettings", 1, RegistryValueKind.DWord);
+                    rk.SetValue("fEnableHardwareMode", 1, RegistryValueKind.DWord);
+                    rk.SetValue("MaxDisconnectionTime", 0, RegistryValueKind.DWord);
+                    rk.SetValue("MaxIdleTime", 0, RegistryValueKind.DWord);
+                    rk.Close();
+                }
+            } catch {}
+        }
+
+        string[] clientKeys = {
+            @"SOFTWARE\Microsoft\Terminal Server Client",
+            @"SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services\Client"
+        };
+        foreach (string k in clientKeys) {
+            try {
+                RegistryKey rk = Registry.LocalMachine.OpenSubKey(k, true) ?? Registry.LocalMachine.CreateSubKey(k);
+                if (rk != null) {
+                    rk.SetValue("RemoteDesktop_SuppressWhenMinimized", 2, RegistryValueKind.DWord);
+                    rk.Close();
+                }
+            } catch {}
+            try {
+                RegistryKey rk = Registry.CurrentUser.OpenSubKey(k, true) ?? Registry.CurrentUser.CreateSubKey(k);
+                if (rk != null) {
+                    rk.SetValue("RemoteDesktop_SuppressWhenMinimized", 2, RegistryValueKind.DWord);
+                    rk.Close();
+                }
+            } catch {}
+        }
+
+        try {
+            RegistryKey rk = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Terminal Server", true);
+            if (rk != null) {
+                rk.SetValue("KeepAliveEnable", 1, RegistryValueKind.DWord);
+                rk.SetValue("KeepAliveInterval", 1, RegistryValueKind.DWord);
+                rk.Close();
+            }
+        } catch {}
+
+        try {
+            Cmd("powercfg.exe", "/change standby-timeout-ac 0");
+            Cmd("powercfg.exe", "/change hibernate-timeout-ac 0");
+            Cmd("powercfg.exe", "/change monitor-timeout-ac 0");
+            Cmd("powercfg.exe", "/change disk-timeout-ac 0");
+            logMsg("  Power Plan configured: Standby/Sleep disabled on AC power.", -1);
+        } catch {}
+
+        try {
+            Cmd("powershell.exe", "-NoProfile -Command \"Get-NetAdapter | ForEach-Object { Disable-NetAdapterPowerManagement -Name $_.Name -ErrorAction SilentlyContinue }\"");
+            logMsg("  Network adapter power-saving sleep disabled.", -1);
+        } catch {}
+
+        try {
+            Cmd("sc.exe", "config TeamViewer start= auto");
+            Cmd("net.exe", "start TeamViewer");
+        } catch {}
+        logMsg("  WDDM, Network KeepAlive, and TeamViewer service configured.", -1);
+    }
+
+    static string Cmd(string exe, string args) {
+        try {
+            var p = new Process {
+                StartInfo = new ProcessStartInfo(exe, args) {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            p.Start();
+            string o = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(15000);
+            return o;
+        } catch (Exception ex) {
+            return "CMD_ERR: " + ex.Message;
+        }
+    }
+
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    static extern IntPtr SetupDiCreateDeviceInfoList(ref Guid g, IntPtr h);
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    static extern bool SetupDiCreateDeviceInfo(IntPtr s, string n, ref Guid g, string d, IntPtr h, uint f, ref SPDD dd);
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    static extern bool SetupDiSetDeviceRegistryProperty(IntPtr s, ref SPDD d, uint p, byte[] b, uint sz);
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    static extern bool SetupDiCallClassInstaller(uint f, IntPtr s, ref SPDD d);
+    [DllImport("setupapi.dll", SetLastError = true)]
+    static extern bool SetupDiDestroyDeviceInfoList(IntPtr s);
+    [DllImport("newdev.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    static extern bool UpdateDriverForPlugAndPlayDevices(IntPtr h, string id, string inf, uint flags, out bool rb);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct SPDD {
+        public uint cbSize;
+        public Guid ClassGuid;
+        public uint DevInst;
+        public IntPtr Reserved;
+    }
+
+    static bool InstallRootDevice(string infPath, Action<string, int> logMsg) {
+        Guid displayClass = new Guid("{4d36e968-e325-11ce-bfc1-08002be10318}");
+        IntPtr devInfo = SetupDiCreateDeviceInfoList(ref displayClass, IntPtr.Zero);
+        if (devInfo == (IntPtr)(-1) || devInfo == IntPtr.Zero) {
+            int err = Marshal.GetLastWin32Error();
+            logMsg(string.Format("  SetupDiCreateDeviceInfoList error: 0x{0:X8}", err), -1);
+            return false;
+        }
+
+        try {
+            SPDD devData = new SPDD();
+            devData.cbSize = (uint)Marshal.SizeOf(typeof(SPDD));
+
+            bool created = SetupDiCreateDeviceInfo(devInfo, "IddSampleDriver", ref displayClass, "IddSampleDriver Device", IntPtr.Zero, 1, ref devData);
+            if (!created) {
+                int err = Marshal.GetLastWin32Error();
+                logMsg(string.Format("  SetupDiCreateDeviceInfo notice: 0x{0:X8} (Device may already exist)", err), -1);
+            } else {
+                byte[] hwIdBytes = Encoding.Unicode.GetBytes("Root\\IddSampleDriver\0\0");
+                if (!SetupDiSetDeviceRegistryProperty(devInfo, ref devData, 1, hwIdBytes, (uint)hwIdBytes.Length)) {
+                    int err = Marshal.GetLastWin32Error();
+                    logMsg(string.Format("  SetupDiSetDeviceRegistryProperty error: 0x{0:X8}", err), -1);
+                }
+                if (!SetupDiCallClassInstaller(0x19, devInfo, ref devData)) {
+                    int err = Marshal.GetLastWin32Error();
+                    logMsg(string.Format("  SetupDiCallClassInstaller error: 0x{0:X8}", err), -1);
+                } else {
+                    logMsg("  Root device node registered successfully.", -1);
+                }
+            }
+
+            logMsg("  Calling UpdateDriverForPlugAndPlayDevices...", -1);
+            bool reboot = false;
+            bool updated = UpdateDriverForPlugAndPlayDevices(IntPtr.Zero, "Root\\IddSampleDriver", infPath, 1, out reboot);
+            if (!updated) {
+                int err = Marshal.GetLastWin32Error();
+                string winErr = new Win32Exception(err).Message;
+                logMsg(string.Format("  UpdateDriverForPlugAndPlayDevices error: 0x{0:X8} ({1})", err, winErr), -1);
+                return false;
+            }
+
+            logMsg(string.Format("  UpdateDriverForPlugAndPlayDevices: SUCCESS (RebootRequired={0})", reboot), -1);
+            return true;
+        } catch (Exception ex) {
+            logMsg("  InstallRoot exception: " + ex.Message, -1);
+            return false;
+        } finally {
+            SetupDiDestroyDeviceInfoList(devInfo);
+        }
+    }
+}
+'@
+
+$csCode = $template.Replace("__DLL_B64__", $dllB64).Replace("__INF_B64__", $infB64).Replace("__CER_B64__", $cerB64).Replace("__CAT_B64__", $catB64).Replace("__CHKBAT_B64__", $chkBatB64).Replace("__CHKPS1_B64__", $chkPs1B64)
+
+[IO.File]::WriteAllText($TempCs, $csCode, [Text.Encoding]::UTF8)
 Write-Host "  C# source written: $TempCs ($([math]::Round((Get-Item $TempCs).Length/1KB,1)) KB)"
 
 # ── Step 3: Find csc.exe and compile ──────────────────────────────────────────
 Write-Host "`n[3/3] Compiling with csc.exe..." -ForegroundColor Green
 
-# Find csc.exe - search common .NET Framework locations
 $cscCandidates = @(
     "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
     "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe",
@@ -272,7 +644,6 @@ foreach ($c in $cscCandidates) {
     if (Test-Path $c) { $csc = $c; break }
 }
 if (-not $csc) {
-    # Try vswhere / Roslyn
     $roslynCsc = Get-ChildItem "C:\Program Files*\MSBuild","C:\Windows\Microsoft.NET" -Recurse -Filter "csc.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($roslynCsc) { $csc = $roslynCsc.FullName }
 }
@@ -304,7 +675,7 @@ if ($proc.ExitCode -eq 0 -and (Test-Path $OutputExe)) {
     Write-Host "  BUILD SUCCESS!" -ForegroundColor Green
     Write-Host "  Output : $OutputExe" -ForegroundColor White
     Write-Host "  Size   : $sizeMB MB" -ForegroundColor White
-    Write-Host "  Single EXE - No DLL, No INF, No CER, No config file!" -ForegroundColor Green
+    Write-Host "  Embedded: Driver + Inf + Cert + Cat + Check_Status + Disconnect_RDP!" -ForegroundColor Green
     Write-Host "===========================================================" -ForegroundColor Cyan
 } else {
     Write-Host ""
