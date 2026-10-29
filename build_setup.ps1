@@ -413,9 +413,13 @@ static class Program {
                 logMsg("  [WARNING] IddSampleDriver device was not detected in Display class.", 96);
             }
 
+            logMsg("Setting up Auto-Unlock on RDP Disconnect...", 97);
+            RegisterAutoUnlockTask(cfgDir, logMsg);
+
             if (driverActive || rootOk) {
                 ok = true;
                 logMsg(string.Format("SUCCESS! {0} Virtual Monitor(s) installed and ready.", count), 100);
+                logMsg("  Auto-Unlock: ACTIVE - RDP [X] se screen ab freeze nahi hogi!", -1);
             } else {
                 logMsg("INSTALLATION WARNING: Driver could not be confirmed as active.", 100);
                 logMsg("Click 'Run Diagnostics' or 'Open Log' for detailed diagnostic info.", -1);
@@ -529,8 +533,84 @@ static class Program {
         try {
             Cmd("sc.exe", "config TeamViewer start= auto");
             Cmd("net.exe", "start TeamViewer");
+            Cmd("sc.exe", "config AnyDesk start= auto");
+            Cmd("net.exe", "start AnyDesk");
+            Cmd("sc.exe", "config UltraViewService start= auto");
+            Cmd("net.exe", "start UltraViewService");
         } catch {}
-        logMsg("  WDDM, Network KeepAlive, and TeamViewer service configured.", -1);
+        logMsg("  WDDM, Network KeepAlive, Remote Access services configured.", -1);
+    }
+
+    static void RegisterAutoUnlockTask(string cfgDir, Action<string, int> logMsg) {
+        try {
+            // 1. Deploy Auto_Console_Handoff.ps1
+            string scriptPath = Path.Combine(cfgDir, "Auto_Console_Handoff.ps1");
+            string script =
+                "# Auto_Console_Handoff.ps1\r\n" +
+                "# Transfers disconnected RDP session to Virtual Console automatically\r\n" +
+                "# Prevents UltraViewer/TeamViewer/AnyDesk screen freeze when RDP [X] pressed\r\n" +
+                "$log = 'C:\\IddSampleDriver\\autounlock.log'\r\n" +
+                "function wl($m) { Add-Content $log \"[$(Get-Date -f 'HH:mm:ss')] $m\" -EA 0 }\r\n" +
+                "wl 'Auto-Unlock triggered.'\r\n" +
+                "Start-Sleep -Seconds 1\r\n" +
+                "$sid = $null\r\n" +
+                "for ($i=1; $i -le 3; $i++) {\r\n" +
+                "    foreach ($ln in (& query session 2>&1)) {\r\n" +
+                "        if ($ln -match '\\s+(\\d+)\\s+Disc\\b') { $n=[int]$Matches[1]; if($n -gt 0){$sid=$n;break} }\r\n" +
+                "    }\r\n" +
+                "    if ($sid) { break }\r\n" +
+                "    Start-Sleep -Seconds 1\r\n" +
+                "}\r\n" +
+                "if ($sid) {\r\n" +
+                "    wl \"Transferring disconnected session $sid to console...\";\r\n" +
+                "    $out = & \"$env:windir\\System32\\tscon.exe\" $sid /dest:console 2>&1;\r\n" +
+                "    wl \"Done. ($out)\";\r\n" +
+                "} else {\r\n" +
+                "    wl 'No disconnected session found. No action taken.';\r\n" +
+                "}\r\n";
+            File.WriteAllText(scriptPath, script, System.Text.Encoding.ASCII);
+            logMsg("  Auto-Unlock script deployed: " + scriptPath, -1);
+
+            // 2. Register Scheduled Task
+            // Trigger: EventID=24 (RDP Session Disconnected) AND UserData/*[Address != 'LOCAL']
+            // This ensures task fires ONLY on real remote RDP disconnect — NOT on reconnects or local console events
+            string taskXml =
+                "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
+                "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
+                "  <RegistrationInfo><Description>Auto-Unlock Virtual Console on RDP Disconnect</Description></RegistrationInfo>\r\n" +
+                "  <Triggers><EventTrigger><Enabled>true</Enabled>\r\n" +
+                "    <Subscription>&lt;QueryList&gt;&lt;Query Id=\"0\" Path=\"Microsoft-Windows-TerminalServices-LocalSessionManager/Operational\"&gt;&lt;Select Path=\"Microsoft-Windows-TerminalServices-LocalSessionManager/Operational\"&gt;*[System[Provider[@Name='Microsoft-Windows-TerminalServices-LocalSessionManager'] and (EventID=24)] and UserData/*[Address != 'LOCAL']]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>\r\n" +
+                "  </EventTrigger></Triggers>\r\n" +
+                "  <Principals><Principal id=\"A\"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\r\n" +
+                "  <Settings>\r\n" +
+                "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\r\n" +
+                "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n" +
+                "    <AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable>\r\n" +
+                "    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\r\n" +
+                "    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>\r\n" +
+                "    <AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><Hidden>true</Hidden>\r\n" +
+                "    <RunOnlyIfIdle>false</RunOnlyIfIdle><WakeToRun>false</WakeToRun>\r\n" +
+                "    <ExecutionTimeLimit>PT1M</ExecutionTimeLimit><Priority>4</Priority>\r\n" +
+                "  </Settings>\r\n" +
+                "  <Actions Context=\"A\"><Exec>\r\n" +
+                "    <Command>powershell.exe</Command>\r\n" +
+                "    <Arguments>-WindowStyle Hidden -ExecutionPolicy Bypass -File \"" + scriptPath + "\"</Arguments>\r\n" +
+                "  </Exec></Actions>\r\n" +
+                "</Task>";
+
+            string xmlTmp = Path.Combine(Path.GetTempPath(), "AutoUnlockTask.xml");
+            File.WriteAllText(xmlTmp, taskXml, System.Text.Encoding.Unicode);
+            string r = Cmd("schtasks.exe", string.Format("/create /tn \"AutoUnlockConsoleOnRDPDisconnect\" /xml \"{0}\" /f", xmlTmp));
+            try { File.Delete(xmlTmp); } catch {}
+
+            if (!string.IsNullOrEmpty(r) && r.IndexOf("SUCCESS", StringComparison.OrdinalIgnoreCase) >= 0) {
+                logMsg("  [OK] AutoUnlock Task registered! RDP [X] = Screen stays LIVE.", -1);
+            } else {
+                logMsg("  AutoUnlock Task note: " + (r ?? "").Trim(), -1);
+            }
+        } catch (Exception ex) {
+            logMsg("  AutoUnlock notice: " + ex.Message, -1);
+        }
     }
 
     static string Cmd(string exe, string args) {

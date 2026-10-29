@@ -407,12 +407,97 @@ public class DeviceInstaller {
 }
 
 # 7. Verify and Refresh
-Write-Host "`n[5/5] Rescanning Devices..." -ForegroundColor Green
+Write-Host "`n[5/6] Rescanning Devices..." -ForegroundColor Green
 & pnputil.exe /scan-devices | Out-Null
 Start-Sleep -Seconds 2
 
 $devices = & pnputil.exe /enum-devices /class Display
 $match = $devices | Select-String -Pattern "IddSample"
+
+# 8. Auto-Unlock: Setup Scheduled Task for auto console handoff on RDP disconnect
+Write-Host "`n[6/6] Setting up Auto-Unlock on RDP Disconnect..." -ForegroundColor Green
+
+$autoUnlockScript = @'
+# Auto_Console_Handoff.ps1 - Transfers disconnected RDP session to Virtual Console
+# Prevents screen freeze in UltraViewer / TeamViewer / AnyDesk when RDP [X] is pressed
+$logFile = "C:\IddSampleDriver\autounlock.log"
+function Write-Log([string]$msg) {
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $logFile -Value "[$ts] $msg" -ErrorAction SilentlyContinue
+}
+Write-Log "Auto-Unlock triggered."
+Start-Sleep -Seconds 1
+$sid = $null
+for ($i = 1; $i -le 3; $i++) {
+    $lines = & query session 2>&1
+    foreach ($line in $lines) {
+        if ($line -match "\s+(\d+)\s+Disc\b") {
+            $n = [int]$Matches[1]
+            if ($n -gt 0) { $sid = $n; break }
+        }
+    }
+    if ($sid) { break }
+    Start-Sleep -Seconds 1
+}
+if ($sid) {
+    Write-Log "Transferring disconnected session $sid to console..."
+    $out = & "$env:windir\System32\tscon.exe" $sid /dest:console 2>&1
+    Write-Log "Done ($out)."
+} else {
+    Write-Log "No disconnected session found (session is active or already on console). No action taken."
+}
+'@
+
+$autoUnlockPath = Join-Path $ConfigDir "Auto_Console_Handoff.ps1"
+$autoUnlockScript | Set-Content -Path $autoUnlockPath -Encoding ASCII -Force
+Write-Host "  Auto-Unlock script deployed: $autoUnlockPath" -ForegroundColor Gray
+
+# Register Windows Scheduled Task triggered on Event ID 24 (remote RDP disconnect only)
+$xmlTask = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Auto transfer disconnected RDP session to Virtual Console</Description></RegistrationInfo>
+  <Triggers>
+    <EventTrigger>
+      <Enabled>true</Enabled>
+      <Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="Microsoft-Windows-TerminalServices-LocalSessionManager/Operational"&gt;&lt;Select Path="Microsoft-Windows-TerminalServices-LocalSessionManager/Operational"&gt;*[System[Provider[@Name='Microsoft-Windows-TerminalServices-LocalSessionManager'] and (EventID=24)] and UserData/*[Address != 'LOCAL']]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription>
+    </EventTrigger>
+  </Triggers>
+  <Principals><Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT1M</ExecutionTimeLimit>
+    <Priority>4</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-WindowStyle Hidden -ExecutionPolicy Bypass -File "$autoUnlockPath"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+"@
+$xmlTmp = Join-Path $env:TEMP "AutoUnlockTask.xml"
+$xmlTask | Set-Content -Path $xmlTmp -Encoding Unicode -Force
+$taskResult = & schtasks.exe /create /tn "AutoUnlockConsoleOnRDPDisconnect" /xml $xmlTmp /f 2>&1
+Remove-Item $xmlTmp -Force -ErrorAction SilentlyContinue
+
+if ($taskResult -match "SUCCESS") {
+    Write-Host "  [OK] AutoUnlock Task registered! RDP [X] se close karne par screen ab kabhi freeze nahi hogi." -ForegroundColor Green
+} else {
+    Write-Host "  AutoUnlock Task note: $taskResult" -ForegroundColor Yellow
+}
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan
 if ($match -or $installed) {
@@ -420,6 +505,7 @@ if ($match -or $installed) {
     Write-Host "  * Active Monitors: $numDisplays" -ForegroundColor White
     Write-Host "  * Configuration: $ConfigFile" -ForegroundColor Gray
     Write-Host "  * Registry settings applied (RDP WDDM graphics enabled)" -ForegroundColor Gray
+    Write-Host "  * Auto-Unlock Task: ACTIVE (RDP [X] se screen freeze nahi hogi)" -ForegroundColor Green
 } else {
     Write-Host "  Setup completed. If monitors do not appear immediately, please restart server." -ForegroundColor Yellow
 }

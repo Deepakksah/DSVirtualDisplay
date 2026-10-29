@@ -88,7 +88,7 @@ foreach ($oem in ($oemInfs | Select-Object -Unique)) {
 }
 
 # 4. Clean Registry & Environment Variable
-Write-Host "`n[3/4] Cleaning Registry Settings..." -ForegroundColor Cyan
+Write-Host "`n[3/5] Cleaning Registry Settings & Auto-Unlock Task..." -ForegroundColor Cyan
 [Environment]::SetEnvironmentVariable("IDD_SAMPLE_DRIVER_CONFIG", $null, "Machine")
 $tsPolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
 if (Test-Path $tsPolicyPath) {
@@ -96,6 +96,9 @@ if (Test-Path $tsPolicyPath) {
     Remove-ItemProperty -Path $tsPolicyPath -Name "bEnUserSettings" -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $tsPolicyPath -Name "fEnableHardwareMode" -ErrorAction SilentlyContinue
 }
+& schtasks.exe /delete /tn "AutoUnlockConsoleOnRDPDisconnect" /f 2>$null
+Remove-Item "C:\IddSampleDriver\Auto_Console_Handoff.ps1" -Force -ErrorAction SilentlyContinue
+Remove-Item "C:\IddSampleDriver\autounlock.log" -Force -ErrorAction SilentlyContinue
 
 # 5. Rescan Devices
 Write-Host "`n[4/4] Rescanning Devices..." -ForegroundColor Cyan
